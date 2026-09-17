@@ -15,7 +15,7 @@ MCP-сервер, который оборачивает **unified Jobs API** kie
 Нажми кнопку — Vercel сам сделает копию репозитория тебе в GitHub, спросит
 API-ключ kie.ai и развернёт сервер. Ни форка, ни папок, ни настроек руками.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/safy/kea-mcp-server&env=KIE_API_KEY&envDescription=API-ключ%20kie.ai&envLink=https://kie.ai/api-key)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/safy/kie-mcp-server&env=KIE_API_KEY&envDescription=API-ключ%20kie.ai&envLink=https://kie.ai/api-key)
 
 1. Жми кнопку **Deploy**.
 2. Войди через GitHub (один клик), при желании поменяй имя проекта.
