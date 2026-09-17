@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Minimal stdio MCP server wrapping the kie.ai unified Jobs API for image generation.
+Minimal stdio MCP server wrapping the kie.ai unified Jobs API for images and video.
 
 No third-party dependencies — Python standard library only.
 
@@ -10,6 +10,7 @@ Auth: reads the API key from the KIE_API_KEY environment variable.
 Optional: KIE_SAVE_DIR env var sets a default folder to download results into.
 
 Exposed tools:
+  - kie_generate_video : submit video generation and return task_id immediately.
   - kie_generate_image : create an image task, poll until done, return URL(s) (and
                          optionally download the file locally).
   - kie_get_task       : query the status/result of a previously created task id.
@@ -30,7 +31,7 @@ CREATE_URL = API_BASE + "/createTask"
 RECORD_URL = API_BASE + "/recordInfo"
 
 SERVER_NAME = "kie"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 DEFAULT_PROTOCOL = "2025-06-18"
 
 
@@ -80,6 +81,10 @@ def create_task(prompt, model, aspect_ratio, resolution, output_format, image_in
         inp["resolution"] = resolution
     if output_format:
         inp["output_format"] = output_format
+    return submit_task(model, inp)
+
+
+def submit_task(model, inp):
     body = {"model": model, "input": inp}
     status, js = _http("POST", CREATE_URL, body)
     if status != 200 or not isinstance(js, dict):
@@ -101,6 +106,8 @@ def get_record(task_id, retries=4):
     for attempt in range(retries):
         status, js = _http("GET", url)
         if status == 200 and isinstance(js, dict):
+            if js.get("code") not in (200, 0, None):
+                raise RuntimeError("recordInfo error %s: %s" % (js.get("code"), js.get("msg")))
             return js.get("data") or {}
         last = "recordInfo HTTP %s: %s" % (status, js)
         # transient network/server errors → retry
@@ -183,6 +190,31 @@ def tool_generate_image(args):
     return "\n".join(lines)
 
 
+def tool_generate_video(args):
+    """Submit once; long video jobs are polled separately, including on Vercel."""
+    if not api_key():
+        raise ValueError("KIE_API_KEY не задан.")
+    prompt = args.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("prompt должен быть непустой строкой.")
+    model = args.get("model", "bytedance/seedance-2-5")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model должен быть непустым ID модели Jobs API.")
+    options = args.get("input", {})
+    if not isinstance(options, dict):
+        raise ValueError("input должен быть объектом параметров выбранной модели.")
+    if "prompt" in options:
+        raise ValueError("Передай prompt отдельно, а не внутри input.")
+    # Keep model-specific names and types intact; video APIs have different schemas.
+    inp = dict(options)
+    inp["prompt"] = prompt.strip()
+    task_id = submit_task(model.strip(), inp)
+    return ("Видео поставлено в очередь. task_id=%s, модель=%s. "
+            "Подожди 15–30 секунд и проверь результат через kie_get_task с этим task_id. "
+            "Если задача ещё выполняется, повторяй проверку позже. "
+            "Не создавай новую генерацию для проверки: это расходует кредиты.") % (task_id, model)
+
+
 def tool_get_task(args):
     if not api_key():
         return "Ошибка: KIE_API_KEY не задан."
@@ -208,6 +240,35 @@ def tool_get_task(args):
 
 
 TOOLS = [
+    {
+        "name": "kie_generate_video",
+        "description": (
+            "Создать видео через kie.ai unified Jobs API. Возвращает task_id сразу после "
+            "постановки в очередь, без ожидания видео. Затем проверяй kie_get_task через "
+            "15–30 секунд; не запускай генерацию повторно для проверки. "
+            "По умолчанию bytedance/seedance-2-5. Передавай параметры модели в input "
+            "по её документации https://docs.kie.ai/market/bytedance/seedance-2-5. "
+            "Для Seedance 2.5: duration (число секунд), resolution (например 720p), "
+            "aspect_ratio (например 16:9), generate_audio (boolean), reference_image_urls, "
+            "reference_video_urls, reference_audio_urls (массивы публичных URL). "
+            "Другие модели поддерживаются только через Jobs API createTask/recordInfo "
+            "с их точными ID и параметрами. Veo/Runway с отдельными API не поддерживаются."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "minLength": 1, "description": "Описание видео."},
+                "model": {"type": "string", "default": "bytedance/seedance-2-5",
+                          "description": "Точный ID видеомодели Kie Jobs API."},
+                "input": {"type": "object", "description":
+                          "Параметры выбранной модели, кроме prompt. Сохраняй типы из документации. "
+                          "Пример Seedance 2.5: {duration: 15, resolution: '720p', "
+                          "aspect_ratio: '16:9', generate_audio: false}. "
+                          "Локальные файлы сначала нужно разместить по доступному сервису URL."}
+            },
+            "required": ["prompt"],
+            "additionalProperties": False
+        }
+    },
     {
         "name": "kie_generate_image",
         "description": ("Сгенерировать изображение через kie.ai (unified Jobs API). Создаёт задачу, "
@@ -244,6 +305,8 @@ TOOLS = [
 
 
 def dispatch_tool(name, args):
+    if name == "kie_generate_video":
+        return tool_generate_video(args)
     if name == "kie_generate_image":
         return tool_generate_image(args)
     if name == "kie_get_task":
